@@ -45,7 +45,7 @@ Bot: Ok, te recordaré en [#-unit].
 
 [Getting Started](https://telegram-bot-sdk.readme.io/docs/getting-started)
 
-### Getting Started
+### Deployment
 
 1. Clone the repository.
 
@@ -82,3 +82,45 @@ Bot: Ok, te recordaré en [#-unit].
    python main.py
 
    ```
+
+### Webhook testing
+
+By powershell, you can test the webhook with the following code:
+
+```powershell
+$uri = "http://localhost:8080/webhook"
+$headers = @{ 
+    "Content-Type" = "application/json"
+}
+
+$body = @{
+    update_id = 10000
+    message = @{
+        message_id = 1
+        from = @{
+            id = 12345
+            first_name = "Test"
+            is_bot = $false
+        }
+        chat = @{
+            id = 12345
+            first_name = "Test"
+            type = "private"
+        }
+        date = 1648000000
+        text = "/start"
+    }
+} | ConvertTo-Json -Depth 5
+
+# Send the request
+try {
+    $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
+    Write-Host "Response: $response"
+} catch {
+    Write-Host "Error: $($_.Exception.Message)"
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode)"
+    Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
+}
+```
+
+If the response is correct, the bot should be able to be hosted on Google Cloud Platform.
