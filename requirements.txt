@@ -1,2 +1,5 @@
-python-telegram-bot==21.6
+python-telegram-bot==20.7
 python-dotenv==1.0.1
+apscheduler==3.10.4
+Flask[async]==2.3.3
+gunicorn==21.2.0
