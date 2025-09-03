@@ -112,7 +112,6 @@ def health_check():
 def home():
     return 'Telegram Bot is running!'
 
-# Cambia temporalmente el final del main.py a esto:
 if __name__ == '__main__':
-    print("Bot is starting with polling...")
-    application.run_polling()
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
