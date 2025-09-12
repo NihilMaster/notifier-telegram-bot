@@ -51,7 +51,7 @@ Bot: Ok, te recordaré en [#-unit].
 
    ```powershell
    git clone https://github.com/NihilMaster/notifier-telegram-bot.git
-   cd telegram-bot-sdk
+   cd notifier-telegram-bot
    ```
 
 2. Create a `.env` file with the following variables:
@@ -83,7 +83,7 @@ Bot: Ok, te recordaré en [#-unit].
 
    ```
 
-### Webhook testing
+### Webhook local testing
 
 By powershell, you can test the webhook with the following code:
 

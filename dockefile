@@ -5,9 +5,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py .
-COPY gunicorn.conf.py .
+COPY main.py .
 
 EXPOSE 8080
 
-CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]
+# Gunicorn con flags directos
+CMD ["gunicorn", "main:app", "-w", "1", "-k", "sync", "--timeout", "60", "--keep-alive", "2", "-b", "0.0.0.0:8080"]
