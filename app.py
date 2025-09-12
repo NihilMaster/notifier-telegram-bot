@@ -24,8 +24,19 @@ def webhook():
             
             logger.debug(f"Chat ID: {chat_id}, Text: {text}")
             
-            # SOLO LOGUEAR POR AHORA
-            logger.debug("Solo logueando, no enviando respuesta aún")
+            if text:
+                response_text = f"Recibí tu mensaje: {text}"
+                send_message_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                payload = {
+                    'chat_id': chat_id,
+                    'text': response_text
+                }
+                
+                try:
+                    response = requests.post(send_message_url, json=payload)
+                    logger.debug(f"Respuesta enviada: {response.status_code}")
+                except Exception as e:
+                    logger.error(f"Error enviando mensaje: {e}")
         
         return jsonify({'status': 'ok'}), 200
         
