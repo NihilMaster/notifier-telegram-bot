@@ -43,9 +43,10 @@ F --> A
 - [x] #1 Host the bot on Google Cloud Platform ✓
 - [x] #2 Schedule messages using Firestore and polling ✓  
 - [x] #3 Implement password authentication system ✓
-- [ ] #4 Create an interactive menu of commands
-- [ ] #5 Add support for different time units (hours, days)
-- [ ] #6 Implement reminder management (list, delete, update)
+- [x] #4 Create an interactive menu of commands ✓
+- [ ] #5 Implement verified accounts storage
+- [ ] #6 Add support for different time units (hours, days)
+- [ ] #7 Implement reminder management (list, delete, update)
 
 ---
 
@@ -76,7 +77,8 @@ F --> A
     --memory 1Gi `
     --cpu 1 `
     --port 8080 `
-    --set-env-vars=BOT_TOKEN=<your-bot-token>,BOT_PASSWORD=<random-password>
+    --set-env-vars=BOT_TOKEN=<your-bot-token> `
+    --set-env-vars=BOT_PASSWORD=<random-password> `
     --max-instances=1 `
     --timeout=60s
 
