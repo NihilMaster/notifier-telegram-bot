@@ -1,6 +1,12 @@
 
 # Notifier
 
+A Telegram bot to notify users about scheduled messages.
+
+## Technical Specification
+
+![Static Badge](https://img.shields.io/badge/Google_Cloud_Platform-Run-4182ed?logo=google-cloud&logoColor=white) ![Static Badge](https://img.shields.io/badge/Google_Cloud_Platform-Firestore-FFCA28?logo=google-cloud&logoColor=white) ![Static Badge](https://img.shields.io/badge/Python-3.13--slim-f2d343?logo=python&logoColor=ffffff) ![python-telegram-bot Badge](https://img.shields.io/badge/Python-python--telegram--bot-2CA5E0?logo=telegram&logoColor=ffffff) ![Static Badge](https://img.shields.io/badge/Flask-2.3.3-000000?logo=flask&logoColor=000000) ![Gunicorn Badge](https://img.shields.io/badge/Gunicorn-23.0.0-499848?logo=gunicorn&logoColor=ffffff) ![Requests Badge](https://img.shields.io/badge/requests-2.32.4-1565C0?logo=zap&logoColor=white)
+
 ## Flow
 
 ### Chat - User Interaction
@@ -36,16 +42,34 @@ D --> F[Reminder Delivery]
 F --> A
 ```
 
----
+### Features
 
-## Tasks
+1. Host the bot-service on Google Cloud Run
+2. Schedule messages using Firestore and polling
+3. Password authentication system
+4. Interactive menu of commands
+5. Verified accounts storage
+6. Implement reminder management (list, delete)
 
-- [x] #1 Host the bot on Google Cloud Platform ✓
-- [x] #2 Schedule messages using Firestore and polling ✓  
-- [x] #3 Implement password authentication system ✓
-- [ ] #4 Create an interactive menu of commands
-- [ ] #5 Add support for different time units (hours, days)
-- [ ] #6 Implement reminder management (list, delete, update)
+### TODO
+
+-[ ] #1 Migrate to Google Cloud Scheduler+Functions+Firestore
+
+-[ ] #2 Support for different time units (hours, days)
+
+-[ ] #3 Support for different time zones
+
+-[ ] #4 Support for different languages
+
+### Commands
+
+```text
+/start
+/help
+/listar
+/eliminar
+/status
+```
 
 ---
 
@@ -76,7 +100,8 @@ F --> A
     --memory 1Gi `
     --cpu 1 `
     --port 8080 `
-    --set-env-vars=BOT_TOKEN=<your-bot-token>,BOT_PASSWORD=<random-password>
+    --set-env-vars=BOT_TOKEN=<your-bot-token> `
+    --set-env-vars=BOT_PASSWORD=<random-password> `
     --max-instances=1 `
     --timeout=60s
 
@@ -88,8 +113,6 @@ F --> A
    gcloud run services describe telegram-bot `
     --region us-central1 `
     --format="yaml(spec.template.spec.containers[0].env)"
-
-
    ```
 
     Otherwise, you can check the [logs](https://console.cloud.google.com/logs/query;storageScope=project) for verify the deployment.
@@ -107,6 +130,14 @@ F --> A
 - `created_time` (number): Unix timestamp of creation
 - `status` (string): 'pending' or 'completed'
 - `completed_time` (number): Unix timestamp of completion (optional)
+
+**Collection**: `verified_users`
+
+**Document fields**:
+
+- `chat_id` (string): Telegram chat ID
+- `last_activity` (number): Unix timestamp of last activity
+- `verification_date` (number): Unix timestamp of verification
 
 **Required Index**:
 

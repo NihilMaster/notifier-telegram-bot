@@ -6,11 +6,10 @@ import threading
 import time
 import re
 from google.cloud import firestore
-import schedule # type: ignore
 
 app = Flask(__name__)
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
@@ -31,7 +30,6 @@ class ReminderSystem:
         """Verifica recordatorios pendientes en Firestore"""
         try:
             now = time.time()
-            logger.debug("🔍 Buscando recordatorios pendientes...")
             
             # Buscar recordatorios cuyo trigger_time sea <= ahora y estén pendientes
             reminders_ref = db.collection('reminders')
@@ -60,8 +58,6 @@ class ReminderSystem:
                 'completed_time': time.time()
             })
             
-            logger.debug(f"Recordatorio {reminder_id} enviado a chat {chat_id}")
-            
         except Exception as e:
             logger.error(f"Error processing reminder {reminder_id}: {e}")
     
@@ -78,7 +74,6 @@ class ReminderSystem:
         thread = threading.Thread(target=worker_loop)
         thread.daemon = True
         thread.start()
-        logger.debug("✅ Worker de recordatorios iniciado")
     
     def stop_worker(self):
         self.running = False
@@ -98,7 +93,6 @@ def send_telegram_message(chat_id, text, delete_after=None):
         response = requests.post(send_message_url, json=payload)
         if response.status_code == 200:
             message_id = response.json()['result']['message_id']
-            logger.debug(f"Mensaje enviado: {response.status_code}, Message ID: {message_id}")
             
             # Programar eliminación si se especifica
             if delete_after is not None:
@@ -123,10 +117,6 @@ def delete_message_after_delay(chat_id, message_id, delay=2):
         }
         try:
             response = requests.post(delete_message_url, json=payload)
-            if response.status_code == 200:
-                logger.debug(f"Mensaje {message_id} eliminado exitosamente")
-            else:
-                logger.warning(f"No se pudo eliminar mensaje {message_id}: {response.status_code}")
         except Exception as e:
             logger.error(f"Error eliminando mensaje {message_id}: {e}")
     
@@ -174,27 +164,46 @@ def create_reminder(chat_id, minutes, message):
         logger.error(f"Error creating reminder: {e}")
         return None
 
+def set_bot_commands():
+    """Configura los comandos del bot en la barra de input"""
+    set_commands_url = f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands"
+    commands = [
+        {"command": "start", "description": "Iniciar bot"},
+        {"command": "help", "description": "Mostrar ayuda"},
+        {"command": "status", "description": "Ver estado de verificación"},
+        {"command": "listar", "description": "Listar recordatorios"},
+        {"command": "eliminar", "description": "Eliminar recordatorio"}
+    ]
+    
+    payload = {"commands": commands}
+    
+    try:
+        response = requests.post(set_commands_url, json=payload)
+        if response.status_code == 200:
+            logger.info("✅ Comandos del bot configurados correctamente")
+        else:
+            logger.error(f"Error configurando comandos: {response.status_code}")
+    except Exception as e:
+        logger.error(f"Error configurando comandos: {e}")
+
 @app.before_request
 def startup():
-    """Inicia el worker de recordatorios cuando la app arranca"""
+    """Inicia el worker de recordatorios y configura comandos cuando la app arranca"""
     if not hasattr(app, 'startup_complete'):
         reminder_system.start_worker()
+        set_bot_commands()
         app.startup_complete = True
 
 @app.route('/', methods=['POST'])
 def webhook():
     try:
-        logger.debug("=== INICIO DE WEBHOOK ===")
         data = request.get_json()
-        logger.debug(f"Datos recibidos: {data}")
         
         if data and 'message' in data:
             message = data['message']
             chat_id = message['chat']['id']
             message_id = message['message_id']
             text = message.get('text', '')
-            
-            logger.debug(f"Chat ID: {chat_id}, Message ID: {message_id}, Text: {text}")
             
             if should_delete_user_message(chat_id, text):
                 delete_message_after_delay(chat_id, message_id, 2)
@@ -207,7 +216,7 @@ def webhook():
         return jsonify({'status': 'ok'}), 200
         
     except Exception as e:
-        logger.error(f"ERROR: {e}", exc_info=True)
+        logger.error(f"ERROR: {e}")
         return jsonify({'status': 'error'}), 200
 
 def handle_start_command(chat_id):
@@ -216,31 +225,133 @@ def handle_start_command(chat_id):
         started_chats[chat_id] = True
         send_telegram_message(chat_id, "Bienvenido.")
         send_telegram_message(chat_id, "Por favor, ingresa la contraseña para continuar:", delete_after=2)
-        logger.debug(f"Nuevo chat {chat_id} iniciado, pidiendo contraseña")
     elif chat_id in verified_chats:
         send_telegram_message(chat_id, "Ya estas verificado. Puedes usar el bot normalmente.")
-        logger.debug(f"Chat {chat_id} ya verificado, informando")
     else:
         send_telegram_message(chat_id, "Por favor, ingresa la contraseña para continuar:", delete_after=2)
-        logger.debug(f"Chat {chat_id} no verificado, pidiendo contraseña nuevamente")
 
 def handle_message(chat_id, text):
     """Maneja mensajes regulares"""
     if chat_id not in started_chats:
-        logger.debug(f"Ignorando mensaje de chat {chat_id} que no ha iniciado con /start")
         return
     
     if chat_id not in verified_chats:
         if text == BOT_PASSWORD:
             verified_chats[chat_id] = True
             send_telegram_message(chat_id, "Contraseña correcta. Ahora puedes usar el bot.", delete_after=2)
-            logger.debug(f"Chat {chat_id} verificado correctamente")
         else:
             send_telegram_message(chat_id, "Contraseña incorrecta. Intenta de nuevo.", delete_after=2)
-            logger.debug(f"Intento fallido de contraseña para chat {chat_id}")
     else:
         process_verified_message(chat_id, text)
 
+def list_reminders(chat_id):
+    """Lista todos los recordatorios pendientes del usuario"""
+    try:
+        # Consultar recordatorios pendientes del usuario específico
+        reminders_ref = db.collection('reminders')
+        query = reminders_ref.where('chat_id', '==', chat_id).where('status', '==', 'pending')
+        reminders = query.stream()
+        
+        reminders_list = []
+        for reminder in reminders:
+            reminder_data = reminder.to_dict()
+            reminders_list.append({
+                'id': reminder.id,
+                'message': reminder_data['message'],
+                'trigger_time': reminder_data['trigger_time'],
+                'minutes': reminder_data['minutes']
+            })
+        
+        # Ordenar por tiempo de activación (más cercano primero)
+        reminders_list.sort(key=lambda x: x['trigger_time'])
+        
+        return reminders_list
+        
+    except Exception as e:
+        logger.error(f"Error listando recordatorios para chat {chat_id}: {e}")
+        return None
+
+def format_reminders_list(reminders_list):
+    """Formatea la lista de recordatorios para mostrarla al usuario"""
+    if not reminders_list:
+        return "📭 No tienes recordatorios activos."
+    
+    message = "📋 *Tus recordatorios activos:*\n\n"
+    
+    for i, reminder in enumerate(reminders_list, 1):
+        # Calcular tiempo restante
+        time_left = reminder['trigger_time'] - time.time()
+        minutes_left = max(0, int(time_left / 60))
+        
+        # Formatear tiempo
+        if minutes_left >= 60:
+            hours = minutes_left // 60
+            minutes = minutes_left % 60
+            time_str = f"{hours}h {minutes}min"
+        else:
+            time_str = f"{minutes_left}min"
+        
+        # Acortar ID para mostrar (primeros 4 caracteres)
+        short_id = reminder['id'][:4]
+        
+        message += f"{i}. 🆔 `{short_id}` ⏰ En {time_str}\n"
+        message += f"   📝 {reminder['message']}\n\n"
+    
+    message += "\nUsa `/eliminar [ID]` para cancelar un recordatorio."
+    return message
+
+def delete_reminder(reminder_id, chat_id):
+    """Elimina un recordatorio específico del usuario"""
+    try:
+        # Primero verificar que el recordatorio existe y pertenece al usuario
+        reminder_ref = db.collection('reminders').document(reminder_id)
+        reminder = reminder_ref.get()
+        
+        if not reminder.exists:
+            return False, "❌ Recordatorio no encontrado."
+        
+        reminder_data = reminder.to_dict()
+        
+        # Verificar que el recordatorio pertenece al usuario
+        if reminder_data['chat_id'] != chat_id:
+            return False, "❌ No tienes permisos para eliminar este recordatorio."
+        
+        # Verificar que el recordatorio está pendiente
+        if reminder_data['status'] != 'pending':
+            return False, "❌ Este recordatorio ya fue completado o cancelado."
+        
+        # Eliminar el recordatorio (o marcarlo como cancelled)
+        reminder_ref.update({
+            'status': 'cancelled',
+            'cancelled_time': time.time()
+        })
+        
+        return True, f"✅ Recordatorio eliminado: \"{reminder_data['message']}\""
+        
+    except Exception as e:
+        logger.error(f"Error eliminando recordatorio {reminder_id}: {e}")
+        return False, "❌ Error al eliminar el recordatorio."
+
+def find_reminder_by_short_id(short_id, chat_id):
+    """Busca un recordatorio por ID corto (primeros caracteres)"""
+    try:
+        # Buscar recordatorios del usuario que coincidan con el ID corto
+        reminders_ref = db.collection('reminders')
+        query = reminders_ref.where('chat_id', '==', chat_id).where('status', '==', 'pending')
+        reminders = query.stream()
+        
+        matching_reminders = []
+        for reminder in reminders:
+            if reminder.id.startswith(short_id):
+                matching_reminders.append(reminder)
+        
+        return matching_reminders
+        
+    except Exception as e:
+        logger.error(f"Error buscando recordatorio con short ID {short_id}: {e}")
+        return []
+
+# Modificar la sección de /eliminar en process_verified_message
 def process_verified_message(chat_id, text):
     """Procesa mensajes de chats verificados"""
     # Verificar si es un recordatorio
@@ -250,48 +361,99 @@ def process_verified_message(chat_id, text):
         handle_reminder_command(chat_id, minutes, reminder_message)
     elif text.startswith('/'):
         if text == '/help':
-            help_text = """Comandos disponibles:
+            help_text = """🤖 *Comandos disponibles:*
+
 /start - Iniciar bot
 /help - Mostrar ayuda
-/status - Ver estado de verificacion
+/status - Ver estado de verificación
+/listar - Listar recordatorios activos
+/eliminar [ID] - Eliminar un recordatorio
 
-Para crear recordatorios:
-"Recordar en X minutos: Tu mensaje"
-Ejemplo: "Recordar en 30 minutos: Llamar al doctor"
-"""
+📝 *Para crear recordatorios:*
+Usa el formato: 
+`Recordar en X minutos: Tu mensaje`
+
+*Ejemplo:*
+`Recordar en 30 minutos: Llamar al doctor`
+`Recordar en 5 minutos: Reunión con el equipo`"""
             send_telegram_message(chat_id, help_text)
         elif text == '/status':
-            send_telegram_message(chat_id, "Tu chat esta verificado correctamente.")
+            send_telegram_message(chat_id, "✅ Tu chat está verificado correctamente.")
+        elif text == '/listar':
+            # Obtener y mostrar recordatorios
+            reminders = list_reminders(chat_id)
+            if reminders is not None:
+                formatted_list = format_reminders_list(reminders)
+                send_telegram_message(chat_id, formatted_list)
+            else:
+                send_telegram_message(chat_id, "❌ Error al obtener tus recordatorios.")
+        elif text.startswith('/eliminar'):
+            # Manejar eliminación
+            parts = text.split()
+            if len(parts) == 2:
+                short_id = parts[1].strip()
+                
+                # Buscar recordatorios que coincidan con el ID corto
+                matching_reminders = find_reminder_by_short_id(short_id, chat_id)
+                
+                if not matching_reminders:
+                    send_telegram_message(chat_id, "❌ No se encontró ningún recordatorio con ese ID.")
+                elif len(matching_reminders) == 1:
+                    # Eliminar el recordatorio único encontrado
+                    reminder_id = matching_reminders[0].id
+                    success, message = delete_reminder(reminder_id, chat_id)
+                    send_telegram_message(chat_id, message)
+                else:
+                    # Múltiples coincidencias - mostrar opciones
+                    message = "🔍 *Múltiples recordatorios encontrados:*\n\n"
+                    for i, reminder in enumerate(matching_reminders[:5], 1):  # Limitar a 5 resultados
+                        reminder_data = reminder.to_dict()
+                        message += f"{i}. 🆔 `{reminder.id[:4]}` 📝 {reminder_data['message']}\n"
+                    
+                    message += "\n🔍 Usa un ID más específico para eliminar."
+                    send_telegram_message(chat_id, message)
+                    
+            else:
+                send_telegram_message(chat_id, "❌ Formato incorrecto. Usa: `/eliminar [ID]`\nEjemplo: `/eliminar A1B2`")
         else:
-            send_telegram_message(chat_id, "Comando no reconocido. Usa /help para ver opciones.")
+            send_telegram_message(chat_id, "❌ Comando no reconocido. Usa /help para ver opciones.")
     else:
-        response_text = f"Dijiste: {text}"
-        send_telegram_message(chat_id, response_text)
+        # Mostrar formato correcto en lugar de "Dijiste:"
+        format_example = """📝 *Formato incorrecto*
+
+Usa el formato:
+`Recordar en X minutos: Tu mensaje`
+
+*Ejemplos:*
+`Recordar en 5 minutos: Reunión con el equipo`
+`Recordar en 30 minutos: Llamar al doctor`
+`Recordar en 60 minutos: Tomar medicamento`"""
+        send_telegram_message(chat_id, format_example)
 
 def handle_reminder_command(chat_id, minutes, message):
     """Maneja la creación de recordatorios"""
     if minutes <= 0:
-        send_telegram_message(chat_id, "El número de minutos debe ser mayor a 0.")
+        send_telegram_message(chat_id, "❌ El número de minutos debe ser mayor a 0.")
         return
     
     if minutes > 10080:  # 7 días
-        send_telegram_message(chat_id, "El máximo es 10080 minutos (7 días).")
+        send_telegram_message(chat_id, "❌ El máximo es 10080 minutos (7 días).")
         return
     
     if not message or len(message.strip()) == 0:
-        send_telegram_message(chat_id, "El mensaje del recordatorio no puede estar vacío.")
+        send_telegram_message(chat_id, "❌ El mensaje del recordatorio no puede estar vacío.")
         return
     
     # Crear el recordatorio
     reminder_id = create_reminder(chat_id, minutes, message)
     
     if reminder_id:
-        send_telegram_message(chat_id, f"Ok, te recordaré en {minutes} minutos.")
-        logger.debug(f"Recordatorio creado: {reminder_id} para chat {chat_id}")
+        send_telegram_message(chat_id, f"📝 Ok, te recordaré en {minutes} minutos.")
     else:
-        send_telegram_message(chat_id, "Error al crear el recordatorio. Intenta nuevamente.")
+        send_telegram_message(chat_id, "❌ Error al crear el recordatorio. Intenta nuevamente.")
 
 if __name__ == '__main__':
-    # Iniciar worker de recordatorios
+    # Iniciar worker de recordatorios y configurar comandos
     reminder_system.start_worker()
+    set_bot_commands()
     app.run(host='0.0.0.0', port=8080, debug=False)
