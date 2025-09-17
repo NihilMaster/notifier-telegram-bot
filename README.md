@@ -53,13 +53,13 @@ F --> A
 
 ### TODO
 
--[ ] #1 Migrate to Google Cloud Scheduler+Functions+Firestore
+- [ ] #1 Migrate to Google Cloud Scheduler+Functions+Firestore
 
--[ ] #2 Support for different time units (hours, days)
+- [ ] #2 Support for different time units (hours, days)
 
--[ ] #3 Support for different time zones
+- [ ] #3 Support for different time zones
 
--[ ] #4 Support for different languages
+- [ ] #4 Support for different languages
 
 ### Commands
 
@@ -72,6 +72,58 @@ F --> A
 ```
 
 ---
+
+## Branching and Release Strategy
+
+This project provides **three parallel product variants**, each represented by its own branch. Each branch is a distinct product line and is maintained independently (not merged into each other).
+
+### Branches (product variants)
+
+- **`local`** → Standalone local version.  
+  A self-contained variant that **does not** use cloud services (no Firestore, no GCP/AWS integrations). Useful for users who want an offline or simplified deployment.
+- **`gcp`** → Variant for **Google Cloud Platform**.  
+  Stable branch with GCP-specific integration and deployment configuration.
+- **`aws`** → Variant for **Amazon Web Services**.  
+  Stable branch with AWS-specific integration and deployment configuration.
+
+> Important: these branches are *parallel* — they represent different builds/targets of the same product idea. Do **not** expect to merge them frequently. Instead, pick the branch that matches your deployment target.
+
+### Master branch: landing & discovery
+
+The repository's **`master`** branch is a **landing page** only (README + docs). It does **not** contain production code. `master` helps newcomers quickly understand which branch to use and how to get started.
+
+### Tags & Releases
+
+We use environment-prefixed tags to keep releases explicit:
+
+- `local-v1.0.0` → Local release 1.0.0
+
+- `gcp-v3.0.0` → GCP release 3.0.0
+
+- `aws-v4.0.0` → AWS release 4.0.0
+
+SemVer rules:
+
+- Major (`X.0.0`) → Breaking changes or first release for a provider.
+
+- Minor (`X.Y.0`) → New features without breaking compatibility.
+
+- Patch (`X.Y.Z`) → Bugfixes and small improvements.
+
+### How to clone a specific variant
+
+Clone the branch that matches what you want to run:
+
+```bash
+# Clone local (standalone)
+git clone -b local https://github.com/NihilMaster/notifier-telegram-bot.git
+
+# Clone GCP variant
+git clone -b gcp https://github.com/NihilMaster/notifier-telegram-bot.git
+
+# Clone AWS variant
+git clone -b aws https://github.com/NihilMaster/notifier-telegram-bot.git
+```
 
 ## Documentation
 
