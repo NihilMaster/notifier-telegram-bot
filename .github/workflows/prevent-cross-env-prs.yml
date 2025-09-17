@@ -1,0 +1,30 @@
+name: Prevent cross-environment PRs
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  prevent-cross-env:
+    name: Prevent cross-environment PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR base/head
+        run: |
+          BASE="${{ github.event.pull_request.base.ref }}"
+          HEAD="${{ github.event.pull_request.head.ref }}"
+          echo "Base branch: $BASE"
+          echo "Head branch: $HEAD"
+
+          is_env() {
+            case "$1" in
+              gcp|aws|local) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          if is_env "$BASE" && is_env "$HEAD" && [ "$BASE" != "$HEAD" ]; then
+            echo "ERROR: Cross-environment PR detected (from $HEAD -> $BASE). These are not allowed."
+            exit 1
+          fi
+
+          echo "OK: PR is allowed."

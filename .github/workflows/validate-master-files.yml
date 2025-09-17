@@ -1,0 +1,44 @@
+name: Validate master files
+on:
+  pull_request:
+    branches: [ master ]
+    types: [opened, reopened, synchronize]
+
+jobs:
+  validate-files:
+    name: Validate master files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch master
+        run: git fetch origin master
+
+      - name: List changed files
+        id: files
+        run: |
+          CHANGED=$(git diff --name-only origin/master...HEAD || true)
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+
+      - name: Validate allowed files
+        run: |
+          CHANGED="${{ steps.files.outputs.changed }}"
+          if [ -z "$CHANGED" ]; then
+            echo "No changed files detected."
+            exit 0
+          fi
+          echo "Changed files: $CHANGED"
+          for f in $CHANGED; do
+            case "$f" in
+              README.md|SECURITY.md|docs/*) 
+                echo "Allowed file: $f"
+                ;;
+              *)
+                echo "Disallowed file for master: $f"
+                exit 1
+                ;;
+            esac
+          done
