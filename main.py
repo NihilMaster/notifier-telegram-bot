@@ -6,7 +6,6 @@ import threading
 import time
 import re
 from google.cloud import firestore
-import schedule # type: ignore
 
 app = Flask(__name__)
 
@@ -245,6 +244,114 @@ def handle_message(chat_id, text):
     else:
         process_verified_message(chat_id, text)
 
+def list_reminders(chat_id):
+    """Lista todos los recordatorios pendientes del usuario"""
+    try:
+        # Consultar recordatorios pendientes del usuario específico
+        reminders_ref = db.collection('reminders')
+        query = reminders_ref.where('chat_id', '==', chat_id).where('status', '==', 'pending')
+        reminders = query.stream()
+        
+        reminders_list = []
+        for reminder in reminders:
+            reminder_data = reminder.to_dict()
+            reminders_list.append({
+                'id': reminder.id,
+                'message': reminder_data['message'],
+                'trigger_time': reminder_data['trigger_time'],
+                'minutes': reminder_data['minutes']
+            })
+        
+        # Ordenar por tiempo de activación (más cercano primero)
+        reminders_list.sort(key=lambda x: x['trigger_time'])
+        
+        return reminders_list
+        
+    except Exception as e:
+        logger.error(f"Error listando recordatorios para chat {chat_id}: {e}")
+        return None
+
+def format_reminders_list(reminders_list):
+    """Formatea la lista de recordatorios para mostrarla al usuario"""
+    if not reminders_list:
+        return "📭 No tienes recordatorios activos."
+    
+    message = "📋 *Tus recordatorios activos:*\n\n"
+    
+    for i, reminder in enumerate(reminders_list, 1):
+        # Calcular tiempo restante
+        time_left = reminder['trigger_time'] - time.time()
+        minutes_left = max(0, int(time_left / 60))
+        
+        # Formatear tiempo
+        if minutes_left >= 60:
+            hours = minutes_left // 60
+            minutes = minutes_left % 60
+            time_str = f"{hours}h {minutes}min"
+        else:
+            time_str = f"{minutes_left}min"
+        
+        # Acortar ID para mostrar (primeros 4 caracteres)
+        short_id = reminder['id'][:4]
+        
+        message += f"{i}. 🆔 `{short_id}` ⏰ En {time_str}\n"
+        message += f"   📝 {reminder['message']}\n\n"
+    
+    message += "\nUsa `/eliminar [ID]` para cancelar un recordatorio."
+    return message
+
+def delete_reminder(reminder_id, chat_id):
+    """Elimina un recordatorio específico del usuario"""
+    try:
+        # Primero verificar que el recordatorio existe y pertenece al usuario
+        reminder_ref = db.collection('reminders').document(reminder_id)
+        reminder = reminder_ref.get()
+        
+        if not reminder.exists:
+            return False, "❌ Recordatorio no encontrado."
+        
+        reminder_data = reminder.to_dict()
+        
+        # Verificar que el recordatorio pertenece al usuario
+        if reminder_data['chat_id'] != chat_id:
+            return False, "❌ No tienes permisos para eliminar este recordatorio."
+        
+        # Verificar que el recordatorio está pendiente
+        if reminder_data['status'] != 'pending':
+            return False, "❌ Este recordatorio ya fue completado o cancelado."
+        
+        # Eliminar el recordatorio (o marcarlo como cancelled)
+        reminder_ref.update({
+            'status': 'cancelled',
+            'cancelled_time': time.time()
+        })
+        
+        return True, f"✅ Recordatorio eliminado: \"{reminder_data['message']}\""
+        
+    except Exception as e:
+        logger.error(f"Error eliminando recordatorio {reminder_id}: {e}")
+        return False, "❌ Error al eliminar el recordatorio."
+
+def find_reminder_by_short_id(short_id, chat_id):
+    """Busca un recordatorio por ID corto (primeros caracteres)"""
+    try:
+        # Buscar recordatorios del usuario que coincidan con el ID corto
+        reminders_ref = db.collection('reminders')
+        query = reminders_ref.where('chat_id', '==', chat_id).where('status', '==', 'pending')
+        reminders = query.stream()
+        
+        matching_reminders = []
+        for reminder in reminders:
+            if reminder.id.startswith(short_id):
+                matching_reminders.append(reminder)
+        
+        return matching_reminders
+        
+    except Exception as e:
+        logger.error(f"Error buscando recordatorio con short ID {short_id}: {e}")
+        return []
+
+# Modificar la sección de /eliminar en process_verified_message
 def process_verified_message(chat_id, text):
     """Procesa mensajes de chats verificados"""
     # Verificar si es un recordatorio
@@ -260,7 +367,7 @@ def process_verified_message(chat_id, text):
 /help - Mostrar ayuda
 /status - Ver estado de verificación
 /listar - Listar recordatorios activos
-/eliminar - Eliminar un recordatorio
+/eliminar [ID] - Eliminar un recordatorio
 
 📝 *Para crear recordatorios:*
 Usa el formato: 
@@ -273,9 +380,41 @@ Usa el formato:
         elif text == '/status':
             send_telegram_message(chat_id, "✅ Tu chat está verificado correctamente.")
         elif text == '/listar':
-            send_telegram_message(chat_id, "📋 Funcionalidad de listar recordatorios en desarrollo.")
-        elif text == '/eliminar':
-            send_telegram_message(chat_id, "🗑️ Funcionalidad de eliminar recordatorios en desarrollo.")
+            # Obtener y mostrar recordatorios
+            reminders = list_reminders(chat_id)
+            if reminders is not None:
+                formatted_list = format_reminders_list(reminders)
+                send_telegram_message(chat_id, formatted_list)
+            else:
+                send_telegram_message(chat_id, "❌ Error al obtener tus recordatorios.")
+        elif text.startswith('/eliminar'):
+            # Manejar eliminación
+            parts = text.split()
+            if len(parts) == 2:
+                short_id = parts[1].strip()
+                
+                # Buscar recordatorios que coincidan con el ID corto
+                matching_reminders = find_reminder_by_short_id(short_id, chat_id)
+                
+                if not matching_reminders:
+                    send_telegram_message(chat_id, "❌ No se encontró ningún recordatorio con ese ID.")
+                elif len(matching_reminders) == 1:
+                    # Eliminar el recordatorio único encontrado
+                    reminder_id = matching_reminders[0].id
+                    success, message = delete_reminder(reminder_id, chat_id)
+                    send_telegram_message(chat_id, message)
+                else:
+                    # Múltiples coincidencias - mostrar opciones
+                    message = "🔍 *Múltiples recordatorios encontrados:*\n\n"
+                    for i, reminder in enumerate(matching_reminders[:5], 1):  # Limitar a 5 resultados
+                        reminder_data = reminder.to_dict()
+                        message += f"{i}. 🆔 `{reminder.id[:4]}` 📝 {reminder_data['message']}\n"
+                    
+                    message += "\n🔍 Usa un ID más específico para eliminar."
+                    send_telegram_message(chat_id, message)
+                    
+            else:
+                send_telegram_message(chat_id, "❌ Formato incorrecto. Usa: `/eliminar [ID]`\nEjemplo: `/eliminar A1B2`")
         else:
             send_telegram_message(chat_id, "❌ Comando no reconocido. Usa /help para ver opciones.")
     else:
